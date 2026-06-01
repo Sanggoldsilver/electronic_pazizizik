@@ -1,0 +1,1544 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>서울시 맞춤형 공공 전기차 충전소 최적 입지 제안 시스템</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter & Noto Sans KR -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Leaflet Map CSS/JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body {
+      font-family: 'Inter', 'Noto Sans KR', sans-serif;
+    }
+    /* 스크롤바 커스터마이징 */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+    /* 지도 격자 스타일링 */
+    .grid-cell-interactive {
+      transition: all 0.2s ease;
+      cursor: pointer;
+    }
+    .grid-cell-interactive:hover {
+      fill-opacity: 0.45 !important;
+      stroke: #4f46e5 !important;
+      stroke-width: 2.5px !important;
+    }
+    /* 실시간 로그용 애니메이션 */
+    .pulse-glow {
+      animation: pulse-glow-anim 2s infinite;
+    }
+    @keyframes pulse-glow-anim {
+      0%, 100% { box-shadow: 0 0 0 0px rgba(99, 102, 241, 0.4); }
+      50% { box-shadow: 0 0 0 10px rgba(99, 102, 241, 0); }
+    }
+
+    /* Leaflet 팝업 스타일 커스텀 */
+    .leaflet-popup-content-wrapper {
+      background: rgba(15, 23, 42, 0.95) !important;
+      color: #f1f5f9 !important;
+      border: 1px solid rgba(99, 102, 241, 0.3) !important;
+      border-radius: 16px !important;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.7), 0 10px 10px -5px rgba(0, 0, 0, 0.5) !important;
+      backdrop-filter: blur(8px);
+    }
+    .leaflet-popup-tip {
+      background: rgba(15, 23, 42, 0.95) !important;
+      border-left: 1px solid rgba(99, 102, 241, 0.3) !important;
+      border-bottom: 1px solid rgba(99, 102, 241, 0.3) !important;
+    }
+    .leaflet-popup-content {
+      margin: 8px 12px !important;
+    }
+    .leaflet-container a.leaflet-popup-close-button {
+      color: #94a3b8 !important;
+      padding: 6px 8px 0 0 !important;
+    }
+    .leaflet-container a.leaflet-popup-close-button:hover {
+      color: #f1f5f9 !important;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col overflow-x-hidden">
+
+  <!-- Top Navigation Bar -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur px-6 py-4 flex flex-col xl:flex-row justify-between items-center gap-4 z-10">
+    <div class="flex items-center gap-3 w-full xl:w-auto">
+      <div class="bg-indigo-600 text-white p-2.5 rounded-xl shadow-lg shadow-indigo-500/20 flex items-center justify-center">
+        <i class="fa-solid fa-charging-station text-xl"></i>
+      </div>
+      <div>
+        <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+          서울시 공공 전기차 충전소 최적 입지 제안 시스템
+          <span class="text-xs bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-2 py-0.5 rounded-full font-normal">SDSS Portal v3.0</span>
+        </h1>
+        <p class="text-xs text-slate-400">서울시 전체 25개 자치구 행정동 및 열린데이터광장 실시간 도시데이터 IoT 연동 엔진</p>
+      </div>
+    </div>
+    
+    <!-- 행정구역 선택 및 API 상태 레이아웃 -->
+    <div class="flex flex-wrap items-center gap-4 w-full xl:w-auto justify-end">
+      <!-- 구 및 동 드롭다운 실시간 연동 셀렉터 -->
+      <div class="flex flex-wrap items-center gap-2 bg-slate-950 border border-slate-800 p-1.5 rounded-xl">
+        <span class="text-[11px] text-slate-400 font-bold px-2 flex items-center gap-1.5">
+          <i class="fa-solid fa-map-location-dot text-indigo-400"></i> 분석 대상지
+        </span>
+        <select id="selectGu" onchange="onGuChange()" class="bg-slate-900 border border-slate-800 rounded-lg text-xs font-semibold py-1.5 px-3 text-white focus:outline-none focus:border-indigo-500 cursor-pointer">
+          <!-- JS에서 동적으로 자치구 바인딩 -->
+        </select>
+        <select id="selectDong" onchange="onDongChange()" class="bg-slate-900 border border-slate-800 rounded-lg text-xs font-semibold py-1.5 px-3 text-white focus:outline-none focus:border-indigo-500 cursor-pointer">
+          <!-- JS에서 동적으로 해당 동 바인딩 -->
+        </select>
+      </div>
+
+      <!-- 실시간 API 활성 정보 -->
+      <div id="apiStatusBadge" class="bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl text-xs flex items-center gap-2 h-[42px] transition-colors">
+        <span class="w-2 h-2 rounded-full bg-amber-500 inline-block animate-ping" id="apiStatusSignal"></span>
+        <span class="text-slate-300" id="apiStatusText">서울 도시데이터: <strong class="text-amber-400 font-medium font-mono">연동대기</strong></span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Workspace Grid -->
+  <main class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-5 p-5 overflow-hidden h-auto lg:h-[calc(100vh-80px)]">
+    
+    <!-- LEFT PANEL: 제어 및 시뮬레이션 (3 cols) -->
+    <section class="lg:col-span-3 flex flex-col gap-4 overflow-y-auto pr-1">
+      
+      <!-- Track Selector (B2G vs B2C) -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-1.5 flex shadow-xl">
+        <button id="btnTrackB2G" onclick="setTrack('B2G')" class="flex-1 py-2 rounded-xl text-xs font-bold transition-all bg-slate-800 text-white flex items-center justify-center gap-2 border border-slate-700/50">
+          <i class="fa-solid fa-server"></i> B2G 정책 입안용
+        </button>
+        <button id="btnTrackB2C" onclick="setTrack('B2C')" class="flex-1 py-2 rounded-xl text-xs font-bold transition-all text-slate-400 hover:text-white flex items-center justify-center gap-2">
+          <i class="fa-solid fa-users"></i> B2C 생활 밀착형
+        </button>
+      </div>
+
+      <!-- Region Spec Status Card -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
+        <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex justify-between items-center">
+          <span>선택 행정구역 스펙</span>
+          <span id="badgePopType" class="bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-[10px] px-2 py-0.5 rounded">서울시 전역모델</span>
+        </h3>
+        <div class="space-y-2">
+          <div class="flex justify-between items-center">
+            <span class="text-xs text-slate-400">행정구역명</span>
+            <span id="txtRegionName" class="text-sm font-semibold text-slate-200">-</span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-xs text-slate-400">동 인구 추정치</span>
+            <span id="txtRegionPop" class="text-sm font-semibold text-white">-</span>
+          </div>
+          <div class="pt-2 border-t border-slate-800 flex justify-between items-center text-xs">
+            <span class="text-slate-400">최적 알고리즘 필터</span>
+            <span id="txtAlgoType" class="text-indigo-400 font-semibold bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded">Seoul Dynamic GWR</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live IoT Weather/Traffic Dashboard -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col gap-3">
+        <div class="flex justify-between items-center border-b border-slate-800 pb-2">
+          <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+            <i class="fa-solid fa-tower-broadcast text-indigo-400"></i>
+            실시간 지역 도시 데이터
+          </h3>
+          <span id="txtLiveUpdateArea" class="text-[9px] bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 px-1.5 py-0.5 rounded font-mono">-</span>
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <div class="bg-slate-950/50 p-2 rounded-lg border border-slate-800/60">
+            <p class="text-[10px] text-slate-500">인구 혼잡 레벨</p>
+            <p id="txtLiveCongest" class="text-sm font-bold text-slate-200 mt-1">-</p>
+          </div>
+          <div class="bg-slate-950/50 p-2 rounded-lg border border-slate-800/60">
+            <p class="text-[10px] text-slate-500">평균 차 속도</p>
+            <p id="txtLiveSpeed" class="text-sm font-bold text-slate-200 mt-1">-</p>
+          </div>
+          <div class="bg-slate-950/50 p-2 rounded-lg border border-slate-800/60">
+            <p class="text-[10px] text-slate-500">실시간 기온</p>
+            <p id="txtLiveTemp" class="text-sm font-bold text-slate-200 mt-1">-</p>
+          </div>
+          <div class="bg-slate-950/50 p-2 rounded-lg border border-slate-800/60">
+            <p class="text-[10px] text-slate-500">미세먼지 (PM10)</p>
+            <p id="txtLiveDust" class="text-sm font-bold text-slate-200 mt-1">-</p>
+          </div>
+        </div>
+        <p id="txtLiveCongestMsg" class="text-[10px] text-slate-400 italic leading-snug bg-slate-950/30 p-2 rounded-lg border border-slate-900">
+          실시간 도시 정보를 분석하는 중입니다.
+        </p>
+      </div>
+
+      <!-- B2G Controller Component -->
+      <div id="panelB2G" class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col gap-4">
+        <div>
+          <h3 class="text-sm font-bold text-white flex items-center gap-2">
+            <i class="fa-solid fa-sliders text-indigo-500"></i>
+            실시간 다이내믹 가중치 조절
+          </h3>
+          <p class="text-[11px] text-slate-400 mt-1">공간 가중 분석 모델의 타깃별 목표치에 맞추어 변수를 가변 제어하고 적합 점수를 재산출합니다.</p>
+        </div>
+
+        <!-- Formula Render Dynamic Box -->
+        <div class="bg-slate-950 border border-indigo-500/20 rounded-xl p-3 text-center">
+          <p class="text-[10px] text-indigo-400 font-semibold uppercase tracking-wider">적용 분석 방정식</p>
+          <div id="latexFormula" class="text-xs text-slate-300 font-mono mt-1.5 bg-slate-900/50 py-1.5 rounded-lg border border-slate-800 overflow-x-auto">
+            Score = α·Demand + β·Welfare - γ·Supply
+          </div>
+        </div>
+
+        <div class="space-y-4">
+          <!-- Slide 1 -->
+          <div>
+            <div class="flex justify-between items-center text-xs mb-1.5">
+              <span id="lblWeightAlpha" class="text-slate-300 flex items-center gap-1.5">
+                <span class="w-2.5 h-2.5 rounded bg-blue-500 inline-block"></span>
+                수요 가중치 (α)
+              </span>
+              <span id="valWeightAlpha" class="text-blue-400 font-bold font-mono">0.50</span>
+            </div>
+            <input id="sliderAlpha" type="range" min="0" max="1" step="0.05" value="0.5" oninput="updateWeights()" class="w-full accent-blue-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer">
+            <p id="lblWeightAlphaDesc" class="text-[10px] text-slate-500 mt-0.5">교통유동량 및 인구 실시간 밀집도 비례 보정 계수</p>
+          </div>
+
+          <!-- Slide 2 -->
+          <div>
+            <div class="flex justify-between items-center text-xs mb-1.5">
+              <span id="lblWeightBeta" class="text-slate-300 flex items-center gap-1.5">
+                <span class="w-2.5 h-2.5 rounded bg-emerald-500 inline-block"></span>
+                복지/접근성 가중치 (β)
+              </span>
+              <span id="valWeightBeta" class="text-emerald-400 font-bold font-mono">0.30</span>
+            </div>
+            <input id="sliderBeta" type="range" min="0" max="1" step="0.05" value="0.3" oninput="updateWeights()" class="w-full accent-emerald-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer">
+            <p id="lblWeightBetaDesc" class="text-[10px] text-slate-500 mt-0.5">주요 공공기관 접근성과 거동 사각지대 해소 균등 지수</p>
+          </div>
+
+          <!-- Slide 3 -->
+          <div>
+            <div class="flex justify-between items-center text-xs mb-1.5">
+              <span class="text-slate-300 flex items-center gap-1.5">
+                <span class="w-2.5 h-2.5 rounded bg-rose-500 inline-block"></span>
+                기설치 공급 감쇄 가중치 (γ)
+              </span>
+              <span id="valWeightGamma" class="text-rose-400 font-bold font-mono">0.40</span>
+            </div>
+            <input id="sliderGamma" type="range" min="0" max="1" step="0.05" value="0.4" oninput="updateWeights()" class="w-full accent-rose-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer">
+            <p class="text-[10px] text-slate-500 mt-0.5">기존 충전 시설들의 밀집도에 비례한 간섭 반발 차감력</p>
+          </div>
+        </div>
+
+        <button onclick="resetSliders()" class="text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800 hover:border-slate-700 py-2 rounded-xl text-xs font-semibold transition-all flex items-center justify-center gap-1.5">
+          <i class="fa-solid fa-rotate-left"></i> 기본 분석 변수 초기화
+        </button>
+      </div>
+
+      <!-- B2C Controller Component -->
+      <div id="panelB2C" class="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col gap-4 hidden">
+        <div>
+          <h3 class="text-sm font-bold text-slate-200 flex items-center gap-2">
+            <i class="fa-solid fa-map-location-dot text-emerald-400"></i>
+            B2C 생활밀착 인프라 필터링
+          </h3>
+          <p class="text-[11px] text-slate-400 mt-1">충전 중 비활성 대기 시간 동안 도보 이동이 용이한 생활 시설을 필터링합니다.</p>
+        </div>
+
+        <!-- Amenity Filter Checks -->
+        <div class="space-y-2.5">
+          <label class="flex items-center gap-3 bg-slate-950/50 hover:bg-slate-950 border border-slate-800 px-3.5 py-2.5 rounded-xl cursor-pointer transition-colors">
+            <input type="checkbox" id="chkCafe" checked onchange="toggleAmenityLayer()" class="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-800 h-4.5 w-4.5">
+            <div class="flex items-center gap-2">
+              <span class="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center text-xs"><i class="fa-solid fa-mug-hot"></i></span>
+              <div>
+                <span class="text-xs font-semibold block text-slate-200">카페 / 휴식시설</span>
+                <span class="text-[9px] text-slate-500">식음료 및 대기 시간 경유 상권 정보</span>
+              </div>
+            </div>
+          </label>
+
+          <label class="flex items-center gap-3 bg-slate-950/50 hover:bg-slate-950 border border-slate-800 px-3.5 py-2.5 rounded-xl cursor-pointer transition-colors">
+            <input type="checkbox" id="chkPark" checked onchange="toggleAmenityLayer()" class="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-800 h-4.5 w-4.5">
+            <div class="flex items-center gap-2">
+              <span class="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center text-xs"><i class="fa-solid fa-tree"></i></span>
+              <div>
+                <span class="text-xs font-semibold block text-slate-200">공원 / 공공녹지</span>
+                <span class="text-[9px] text-slate-500">근린 휴양 녹지 및 체육 산책 공간</span>
+              </div>
+            </div>
+          </label>
+
+          <label class="flex items-center gap-3 bg-slate-950/50 hover:bg-slate-950 border border-slate-800 px-3.5 py-2.5 rounded-xl cursor-pointer transition-colors">
+            <input type="checkbox" id="chkMall" checked onchange="toggleAmenityLayer()" class="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-800 h-4.5 w-4.5">
+            <div class="flex items-center gap-2">
+              <span class="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center text-xs"><i class="fa-solid fa-bag-shopping"></i></span>
+              <div>
+                <span class="text-xs font-semibold block text-slate-200">쇼핑몰 / 대형마트</span>
+                <span class="text-[9px] text-slate-500">생필품 구매 목적 생활 유통 시설</span>
+              </div>
+            </div>
+          </label>
+        </div>
+
+        <!-- Walking Distance Radius buffer settings -->
+        <div>
+          <div class="flex justify-between items-center text-xs mb-1.5">
+            <span class="text-slate-300">도보권 버퍼 반경</span>
+            <span id="valBufferRadius" class="text-emerald-400 font-bold font-mono">300m (도보 5분)</span>
+          </div>
+          <input id="sliderBuffer" type="range" min="100" max="600" step="50" value="300" oninput="updateBufferRadius()" class="w-full accent-emerald-500 h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer">
+          <p class="text-[9px] text-slate-500 mt-1">충전소 핀을 마우스 클릭하면 주변 도보권 버퍼를 시각화합니다.</p>
+        </div>
+      </div>
+
+      <!-- Live Webhook & Report Download -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col gap-3">
+        <h4 class="text-xs font-bold text-slate-300 uppercase tracking-wide flex items-center gap-1.5">
+          <i class="fa-solid fa-satellite-dish text-emerald-400"></i>
+          연동 및 결과 분석 도구
+        </h4>
+        <p class="text-[10px] text-slate-400 leading-relaxed">
+          가상 수립 결과를 서울시 도시데이터 DB와 동기화하거나 정책 승인 보고서를 JSON으로 즉각 저장합니다.
+        </p>
+        <div class="grid grid-cols-2 gap-2">
+          <button onclick="triggerSimulatedAPI()" class="bg-indigo-600/10 hover:bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 py-2 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1">
+            <i class="fa-solid fa-cloud-arrow-down"></i> Webhook 전송
+          </button>
+          <button onclick="downloadReport()" class="bg-emerald-600/10 hover:bg-emerald-600/20 border border-emerald-500/30 text-emerald-300 py-2 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1">
+            <i class="fa-solid fa-file-export"></i> 리포트 저장
+          </button>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- CENTER PANEL: 지도 및 실시간 시뮬레이터 (6 cols) -->
+    <section class="lg:col-span-6 flex flex-col gap-4 min-h-[450px]">
+      
+      <!-- Interactive Leaflet Map Area -->
+      <div class="flex-1 bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden relative flex flex-col shadow-2xl">
+        
+        <!-- Status Indicator float overlay -->
+        <div class="absolute top-4 left-4 z-[1000] bg-slate-900/95 border border-slate-800 backdrop-blur rounded-2xl p-3 shadow-xl max-w-sm pointer-events-none">
+          <div class="flex items-start gap-2.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block animate-ping mt-1"></span>
+            <div>
+              <p class="text-[11px] font-bold text-white tracking-wide uppercase">인터랙티브 분석 모드</p>
+              <p class="text-[10px] text-slate-400 leading-tight mt-0.5">지도의 빈 격자나 특정 지점을 마우스로 <strong class="text-indigo-400">클릭</strong>하여 가상 충전소(Proposed)를 세우고 실시간 최적 점수 파동을 분석해 보세요.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Map Layer Switch Indicator float overlay -->
+        <div class="absolute top-4 right-4 z-[1000] flex gap-1.5">
+          <div class="bg-slate-950/80 border border-slate-800 backdrop-blur px-2.5 py-1 rounded-xl text-[10px] font-semibold text-indigo-400 flex items-center gap-1.5 shadow-lg">
+            <i class="fa-solid fa-database text-[8px]"></i> IoT Live Sync
+          </div>
+        </div>
+
+        <!-- MAP CONTAINER -->
+        <div id="map" class="flex-1 w-full bg-slate-100"></div>
+
+        <!-- Map Custom Legend -->
+        <div class="bg-slate-900 border-t border-slate-800 px-5 py-3.5 flex flex-wrap gap-4 items-center justify-between text-xs text-slate-400">
+          <div class="flex flex-wrap items-center gap-4">
+            <div class="flex items-center gap-1.5">
+              <span class="w-3 h-3 rounded-full bg-indigo-500 border border-indigo-300 shadow"></span>
+              <span>기존 공공 충전소</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="w-3 h-3 rounded-full bg-emerald-500 border border-emerald-300 shadow"></span>
+              <span>기존 민간 충전소</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="w-3.5 h-3.5 bg-yellow-400 border border-slate-900 rounded flex items-center justify-center text-[8px] text-slate-950 font-bold"><i class="fa-solid fa-plus"></i></span>
+              <span class="text-slate-300 font-semibold">시뮬레이션 가상소</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <span class="w-3 h-3 rounded bg-indigo-500/70 border border-indigo-400/40 inline-block"></span>
+              <span>최적 입지 점수 범례 (고:진함)</span>
+            </div>
+          </div>
+          <div id="mapSelectedCoord" class="text-[10px] font-mono text-slate-500">
+            시뮬레이션 대기 중
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- RIGHT PANEL: 통계 모니터링 및 실시간 API 피드백 (3 cols) -->
+    <section class="lg:col-span-3 flex flex-col gap-4 overflow-y-auto pl-1">
+      
+      <!-- Spatial Autocorrelation & NNR Stats (Poster Based) -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wide">포스터 핵심 공간 지표 검증</h3>
+          <span class="text-[9px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-1.5 py-0.5 rounded font-mono">GWR Model</span>
+        </div>
+        
+        <div class="grid grid-cols-2 gap-2.5">
+          <div class="bg-slate-950/50 border border-slate-800/80 rounded-xl p-2.5">
+            <p class="text-[10px] text-slate-500 leading-none">가장 가까운 이웃 지수 (NNR)</p>
+            <p id="statNNR" class="text-base font-bold text-rose-400 mt-1.5">0.198 <span class="text-[10px] font-normal text-slate-500">군집</span></p>
+            <p class="text-[9px] text-slate-500 mt-1">임의분포(CSR) 기각</p>
+          </div>
+          <div class="bg-slate-950/50 border border-slate-800/80 rounded-xl p-2.5">
+            <p class="text-[10px] text-slate-500 leading-none">분산 대 평균 비율 (VMR)</p>
+            <p id="statVMR" class="text-base font-bold text-rose-400 mt-1.5">10.97</p>
+            <p class="text-[9px] text-slate-500 mt-1">공간 쏠림 왜곡 심각</p>
+          </div>
+        </div>
+
+        <div class="mt-3 bg-slate-950/30 border border-slate-800/60 rounded-xl p-2.5 text-[10px] text-slate-400 leading-normal">
+          <i class="fa-solid fa-circle-info text-indigo-400 mr-1 inline-block"></i> 
+          <span id="txtSpatialInsight">선택 자치동의 공간 가중 밀도 인덱스를 보완하기 위해, 본 제안 시스템의 입지 점수가 극대화된 사각 격자에 가상 충전소를 증설해 보십시오.</span>
+        </div>
+      </div>
+
+      <!-- Score Distribution Chart -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col">
+        <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+          <i class="fa-solid fa-chart-column text-indigo-400"></i>
+          지구 전체 후보지 점수 분포도
+        </h3>
+        <p class="text-[10px] text-slate-500 mb-3">격자들의 정규화된 최종 최적 점수 빈도 시뮬레이션</p>
+        <div class="relative w-full h-[150px] bg-slate-950/40 rounded-xl p-1.5 flex items-center justify-center">
+          <canvas id="scoreChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Simulation List Panel -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col">
+        <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+          <i class="fa-solid fa-clock-rotate-left text-yellow-500"></i>
+          가상 설치 시뮬레이션 이력
+        </h3>
+        <div id="simulationHistoryList" class="max-h-[120px] overflow-y-auto space-y-2 pr-1 text-[11px]">
+          <div class="text-slate-500 text-center py-4">생성된 가상 충전소가 없습니다.</div>
+        </div>
+      </div>
+
+      <!-- Real-time API Webhook Feed Log Terminal -->
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl flex-1 flex flex-col min-h-[180px]">
+        <div class="flex justify-between items-center mb-2.5">
+          <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+            <i class="fa-solid fa-terminal text-emerald-400 text-xs"></i>
+            실시간 API 및 모델 환류 로그
+          </h3>
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+        </div>
+        
+        <!-- Live Log Terminal Container -->
+        <div id="logTerminal" class="flex-1 bg-slate-950 border border-slate-800 rounded-xl p-3 font-mono text-[10px] text-emerald-400/90 overflow-y-auto space-y-2 h-[120px]">
+          <div class="text-slate-500">[SYSTEM] 서울특별시 SDSS 커널 가동 완료.</div>
+          <div class="text-indigo-400">[SYSTEM] 서울 자치구별 가중치 지리적 인덱스(GWR) 보정 엔진 준비.</div>
+        </div>
+
+        <button onclick="clearLogs()" class="mt-2.5 text-[9px] text-slate-500 hover:text-slate-300 text-right font-semibold transition-colors block">
+          로그 내역 비우기
+        </button>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- Floating Interactive Notification Box (To avoid alert/confirm) -->
+  <div id="toastNotification" class="fixed bottom-5 right-5 z-[5000] bg-indigo-950 border border-indigo-700/50 text-indigo-100 px-4 py-3 rounded-2xl shadow-2xl max-w-sm flex items-start gap-3 transition-all transform translate-y-20 opacity-0 pointer-events-none">
+    <div class="bg-indigo-600 text-white rounded-lg p-1.5 text-xs">
+      <i class="fa-solid fa-circle-check"></i>
+    </div>
+    <div>
+      <h5 id="toastTitle" class="text-xs font-bold">공간 분석 알림</h5>
+      <p id="toastBody" class="text-[10px] text-indigo-200 mt-0.5">실시간 DB 동기화 및 밀도 보간 완료.</p>
+    </div>
+    <button onclick="hideToast()" class="text-indigo-400 hover:text-indigo-200 text-xs self-start ml-2">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+  </div>
+
+  <!-- STYLES AND SCRIPTS FOR THE APPLICATION INTERACTIVITY -->
+  <script>
+    // ----------------------------------------------------
+    // 1. 서울시 25개 자치구 및 소속 전체 행정동 데이터베이스 구성
+    // ----------------------------------------------------
+    const seoulGeoData = {
+      "강남구": {
+        center: [37.4959, 127.0664],
+        apiArea: "강남역",
+        population: 544055,
+        dongs: ["신사동", "논현1동", "논현2동", "압구정동", "청담동", "삼성1동", "삼성2동", "대치1동", "대치2동", "대치4동", "역삼1동", "역삼2동", "도곡1동", "도곡2동", "개포1동", "개포2동", "개포4동", "세곡동", "일원본동", "일원1동", "수서동"]
+      },
+      "강동구": {
+        center: [37.5302, 127.1238],
+        apiArea: "천호역",
+        population: 463321,
+        dongs: ["강일동", "상일1동", "상일2동", "명일1동", "명일2동", "고덕1동", "고덕2동", "암사1동", "암사2동", "암사3동", "천호1동", "천호2동", "천호3동", "성내1동", "성내2동", "성내3동", "길동", "둔촌1동", "둔촌2동"]
+      },
+      "강북구": {
+        center: [37.6396, 127.0257],
+        apiArea: "수유역",
+        population: 297702,
+        dongs: ["삼양동", "미아동", "송중동", "송천동", "삼각산동", "번1동", "번2동", "번3동", "수유1동", "수유2동", "수유3동", "우이동", "인수동"]
+      },
+      "강서구": {
+        center: [37.5509, 126.8496],
+        apiArea: "발산역",
+        population: 573711,
+        dongs: ["염창동", "등촌1동", "등촌2동", "등촌3동", "화곡1동", "화곡2동", "화곡3동", "화곡4동", "화곡본동", "화곡6동", "화곡8동", "가양1동", "가양2동", "가양3동", "발산1동", "우장산동", "공항동", "방화1동", "방화2동", "방화3동"]
+      },
+      "관악구": {
+        center: [37.4784, 126.9516],
+        apiArea: "신림역",
+        population: 502628,
+        dongs: ["보라매동", "청림동", "성현동", "행운동", "낙성대동", "청룡동", "은천동", "중앙동", "인헌동", "남현동", "서원동", "신원동", "서림동", "신사동", "신림동", "난향동", "조원동", "대학동", "미성동", "난곡동", "삼성동"]
+      },
+      "광진구": {
+        center: [37.5385, 127.0823],
+        apiArea: "건대입구역",
+        population: 351185,
+        dongs: ["화양동", "군자동", "중곡1동", "중곡2동", "중곡3동", "중곡4동", "능동", "구의1동", "구의2동", "구의3동", "광장동", "자양1동", "자양2동", "자양3동", "자양4동"]
+      },
+      "구로구": {
+        center: [37.4954, 126.8581],
+        apiArea: "신도림역",
+        population: 418303,
+        dongs: ["신도림동", "구로1동", "구로2동", "구로3동", "구로4동", "구로5동", "가리봉동", "고척1동", "고척2동", "개봉1동", "개봉2동", "개봉3동", "오류1동", "오류2동", "수궁동", "항동"]
+      },
+      "금천구": {
+        center: [37.4568, 126.8954],
+        apiArea: "가산디지털단지역",
+        population: 242818,
+        dongs: ["가산동", "독산1동", "독산2동", "독산3동", "독산4동", "시흥1동", "시흥2동", "시흥3동", "시흥4동", "시흥5동"]
+      },
+      "노원구": {
+        center: [37.6544, 127.0565],
+        apiArea: "노원역",
+        population: 506450,
+        dongs: ["월계1동", "월계2동", "월계3동", "공릉1동", "공릉2동", "하계1동", "하계2동", "중계본동", "중계1동", "중계4동", "중계2.3동", "상계1동", "상계2동", "상계3.4동", "상계5동", "상계6.7동", "상계8동", "상계9동", "상계10동"]
+      },
+      "도봉구": {
+        center: [37.6687, 127.0471],
+        apiArea: "창동 신경제중심지",
+        population: 312858,
+        dongs: ["창1동", "창2동", "창3동", "창4동", "창5동", "도봉1동", "도봉2동", "방학1동", "방학2동", "방학3동", "쌍문1동", "쌍문2동", "쌍문3동", "쌍문4동"]
+      },
+      "동대문구": {
+        center: [37.5744, 127.0400],
+        apiArea: "청량리역",
+        population: 353601,
+        dongs: ["용신동", "제기동", "전농1동", "전농2동", "답십리1동", "답십리2동", "장안1동", "장안2동", "청량리동", "회기동", "휘경1동", "휘경2동", "이문1동", "이문2동"]
+      },
+      "동작구": {
+        center: [37.5124, 126.9395],
+        apiArea: "사당역",
+        population: 390377,
+        dongs: ["노량진1동", "노량진2동", "상도1동", "상도2동", "상도3동", "상도4동", "사당1동", "사당2동", "사당3동", "사당4동", "사당5동", "대방동", "신대방1동", "신대방2동", "흑석동"]
+      },
+      "마포구": {
+        center: [37.5622, 126.9083],
+        apiArea: "홍대입구역",
+        population: 376742,
+        dongs: ["아현동", "공덕동", "도화동", "용강동", "대흥동", "염리동", "신수동", "서강동", "서교동", "합정동", "망원1동", "망원2동", "연남동", "성산1동", "성산2동", "상암동"]
+      },
+      "서대문구": {
+        center: [37.5791, 126.9368],
+        apiArea: "신촌·이대역",
+        population: 320627,
+        dongs: ["충현동", "천연동", "북아현동", "신촌동", "연희동", "홍제1동", "홍제2동", "홍제3동", "홍은1동", "홍은2동", "남가좌1동", "남가좌2동", "북가좌1동", "북가좌2동"]
+      },
+      "서초구": {
+        center: [37.4837, 127.0324],
+        apiArea: "고속터미널역",
+        population: 408451,
+        dongs: ["서초1동", "서초2동", "서초3동", "서초4동", "잠원동", "반포본동", "반포1동", "반포2동", "반포3동", "반포4동", "방배본동", "방배1동", "방배2동", "방배3동", "방배4동", "양재1동", "양재2동", "내곡동"]
+      },
+      "성동구": {
+        center: [37.5635, 127.0368],
+        apiArea: "성수카페거리",
+        population: 284766,
+        dongs: ["왕십리2동", "왕십리도선동", "마장동", "사근동", "행당1동", "행당2동", "응봉동", "금호1가동", "금호2.3가동", "금호4가동", "옥수동", "성수1가1동", "성수1가2동", "성수2가1동", "성수2가3동", "송정동", "용답동"]
+      },
+      "성북구": {
+        center: [37.5891, 127.0182],
+        apiArea: "성신여대입구역",
+        population: 438168,
+        dongs: ["성북동", "삼선동", "동선동", "돈암1동", "돈암2동", "안암동", "보문동", "정릉1동", "정릉2동", "정릉3동", "정릉4동", "길음1동", "길음2동", "종암동", "월곡1동", "월곡2동", "장위1동", "장위2동", "장위3동", "석관동"]
+      },
+      "송파구": {
+        center: [37.5145, 127.1062],
+        apiArea: "잠실관광특구",
+        population: 660006,
+        dongs: ["풍납1동", "풍납2동", "거여1동", "거여2동", "마천1동", "마천2동", "방이1동", "방이2동", "오륜동", "오금동", "송파1동", "송파2동", "석촌동", "삼전동", "가락본동", "가락1동", "가락2동", "문정1동", "문정2동", "장지동", "위례동", "잠실본동", "잠실2동", "잠실3동", "잠실4동", "잠실6동", "잠실7동"]
+      },
+      "양천구": {
+        center: [37.5169, 126.8665],
+        apiArea: "목동역",
+        population: 442225,
+        dongs: ["목1동", "목2동", "목3동", "목4동", "목5동", "신월1동", "신월2동", "신월3동", "신월4동", "신월5동", "신월6동", "신월7동", "신정1동", "신정2동", "신정3동", "신정4동", "신정6동", "신정7동"]
+      },
+      "영등포구": {
+        center: [37.5264, 126.8962],
+        apiArea: "여의도",
+        population: 377837,
+        dongs: ["영등포본동", "영등포동", "여의동", "당산1동", "당산2동", "도림동", "문래동", "양평1동", "양평2동", "신길1동", "신길3동", "신길4동", "신길5동", "신길6동", "신길7동", "대림1동", "대림2동", "대림3동"]
+      },
+      "용산구": {
+        center: [37.5326, 126.9904],
+        apiArea: "이태원관광특구",
+        population: 218751,
+        dongs: ["후암동", "용산2가동", "남영동", "청파동", "원효로1동", "원효로2동", "효창동", "용문동", "한강로동", "이촌1동", "이촌2동", "이태원1동", "이태원2동", "한남동", "서빙고동", "보광동"]
+      },
+      "은평구": {
+        center: [37.6027, 126.9291],
+        apiArea: "연신내역",
+        population: 468393,
+        dongs: ["녹번동", "불광1동", "불광2동", "갈현1동", "갈현2동", "구산동", "대조동", "응암1동", "응암2동", "응암3동", "역촌동", "신사1동", "신사2동", "증산동", "수색동", "진관동"]
+      },
+      "종로구": {
+        center: [37.5730, 126.9790],
+        apiArea: "북촌한옥마을",
+        population: 141379,
+        dongs: ["청운효자동", "사직동", "삼청동", "부암동", "평창동", "무악동", "교남동", "가회동", "종로1.2.3.4가동", "종로5.6가동", "이화동", "혜화동", "창신1동", "창신2동", "창신3동", "숭인1동", "숭인2동"]
+      },
+      "중구": {
+        center: [37.5641, 126.9979],
+        apiArea: "명동관광특구",
+        population: 121405,
+        dongs: ["소공동", "회현동", "명동", "필동", "장충동", "광희동", "을지로동", "신당동", "다산동", "약수동", "청구동", "동화동", "황학동", "중림동"]
+      },
+      "중랑구": {
+        center: [37.6066, 127.0927],
+        apiArea: "중화역",
+        population: 385663,
+        dongs: ["면목본동", "면목2동", "면목3.8동", "면목4동", "면목5동", "면목7동", "상봉1동", "상봉2동", "중화1동", "중화2동", "묵1동", "묵2동", "망우본동", "망우3동", "신내1동", "신내2동"]
+      }
+    };
+
+    // ----------------------------------------------------
+    // 2. 전역 시스템 제어 및 상태 변수
+    // ----------------------------------------------------
+    let activeGu = "강남구";
+    let activeDong = "역삼1동";
+    let activeTrack = "B2G"; // B2G or B2C
+    let weightAlpha = 0.5;
+    let weightBeta = 0.3;
+    let weightGamma = 0.4;
+    let bufferRadius = 300; // 도보 버퍼 반경 (B2C용)
+
+    // 실시간 API 수신 데이터 보관소
+    let apiDataCache = null;
+
+    // 동적 렌더링용 현재 영역 지표셋
+    let activeRegionData = {
+      name: "",
+      population: 0,
+      center: [],
+      bounds: [],
+      nnr: 0,
+      vmr: 0,
+      chargers: [],
+      govOffices: [],
+      amenities: [],
+      demandBase: []
+    };
+
+    // 리플렛 및 통계 추적 객체
+    let map = null;
+    let gridLayers = [];
+    let chargerMarkers = [];
+    let govMarkers = [];
+    let amenityMarkers = [];
+    let activeBufferCircle = null;
+    let userSimulatedChargers = []; // 사용자 세션 가상 마커
+    let scoreChart = null;
+
+    // ----------------------------------------------------
+    // 3. 자바스크립트 스코어/지도 전처리 초기 배치
+    // ----------------------------------------------------
+    function clearAllMarkers() {
+      chargerMarkers.forEach(m => { if (map && map.hasLayer(m)) map.removeLayer(m); });
+      chargerMarkers = [];
+      govMarkers.forEach(m => { if (map && map.hasLayer(m)) map.removeLayer(m); });
+      govMarkers = [];
+      amenityMarkers.forEach(m => { if (map && map.hasLayer(m)) map.removeLayer(m); });
+      amenityMarkers = [];
+      if (activeBufferCircle && map && map.hasLayer(activeBufferCircle)) {
+        map.removeLayer(activeBufferCircle);
+        activeBufferCircle = null;
+      }
+    }
+
+    // ----------------------------------------------------
+    // 4. 서울 열린데이터광장 OpenAPI 실시간 연동
+    // ----------------------------------------------------
+    async function fetchSeoulCityData(areaName) {
+      const apiKey = "726363445162696c3938676c577a70";
+      const url = `https://openapi.seoul.go.kr:8088/${apiKey}/json/citydata/1/5/${encodeURIComponent(areaName)}`;
+      
+      let delay = 500;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const json = await response.json();
+          
+          if (json && json["CITYDATA"]) {
+            return json["CITYDATA"];
+          }
+          if (json && json["RESULT"] && json["RESULT"]["MESSAGE"]) {
+            throw new Error(json["RESULT"]["MESSAGE"]);
+          }
+          throw new Error("Invalid API format");
+        } catch (error) {
+          if (attempt === 3) {
+            throw error;
+          }
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay *= 2;
+        }
+      }
+    }
+
+    function getFallbackMockData(areaName) {
+      const minVal = new Date().getMinutes();
+      const congestions = ["여유", "보통", "약간 붐빔", "붐빔"];
+      const weathers = ["맑음", "구름조금", "흐림", "비", "소나기"];
+      
+      const seed = areaName.length + minVal;
+      const congestLvl = congestions[seed % congestions.length];
+      const weatherLvl = weathers[seed % weathers.length];
+      const speed = (18.5 + (seed % 15)).toFixed(1);
+      const temp = (16.2 + (seed % 12)).toFixed(1);
+      const pm10 = (25 + (seed % 35)).toString();
+
+      return {
+        "AREA_NM": areaName,
+        "AREA_CONGEST_LVL": congestLvl,
+        "AREA_CONGEST_MSG": `${areaName} 구역은 현재 유동 인구 흐름이 집중되는 상태입니다.`,
+        "ROAD_TRAFFIC_STTS": {
+          "ROAD_MSG": "도심 사거리 일대 국지적 서행 정체 현상 감지",
+          "ROAD_TRAFFIC_SPD": speed
+        },
+        "WEATHER_STTS": {
+          "TEMP": temp,
+          "WEATHER_MSG": weatherLvl,
+          "PM10": pm10,
+          "PM25": (parseInt(pm10) / 2).toFixed(0)
+        }
+      };
+    }
+
+    // ----------------------------------------------------
+    // 5. 서울시 자치동 정밀 공간 좌표 보간 생성 모듈
+    // ----------------------------------------------------
+    function buildDongSpatialData(guName, dongName) {
+      const guInfo = seoulGeoData[guName];
+      const guCenter = guInfo.center;
+      const dongsArray = guInfo.dongs;
+      
+      const dongIndex = dongsArray.indexOf(dongName);
+      const angle = (dongIndex / dongsArray.length) * 2 * Math.PI;
+      const radiusOffset = 0.0055;
+
+      const lat = guCenter[0] + Math.sin(angle) * radiusOffset;
+      const lng = guCenter[1] + Math.cos(angle) * radiusOffset;
+
+      const latSpan = 0.005;
+      const lngSpan = 0.008;
+
+      const seededVal = Math.abs(lat * lng * 1000);
+      function getSeededRandom(offset, min, max) {
+        const x = Math.sin(seededVal + offset) * 10000;
+        return min + (x - Math.floor(x)) * (max - min);
+      }
+
+      const chargers = [
+        { id: "c_p1", lat: lat + 0.0015, lng: lng - 0.002, capacity: Math.round(getSeededRandom(1, 3, 8)), type: "public", name: `${dongName} 공영 충전소`, detail: "초급속 2기 / 완속 4기" },
+        { id: "c_p2", lat: lat - 0.001, lng: lng + 0.003, capacity: Math.round(getSeededRandom(2, 2, 6)), type: "private", name: `${dongName} 테크노 상가`, detail: "완속 4기 상시 개방" }
+      ];
+
+      if (getSeededRandom(3, 0, 1) > 0.45) {
+        chargers.push({
+          id: "c_p3", lat: lat + 0.002, lng: lng + 0.001, capacity: Math.round(getSeededRandom(4, 4, 12)), type: "public", name: `${dongName} 복합체육관`, detail: "급속 멀티포트 완비"
+        });
+      }
+
+      const govOffices = [
+        { name: `${dongName} 행정복지센터`, lat: lat + 0.0005, lng: lng + 0.0008, desc: "주민 안심 충전 연계 거점" },
+        { name: `${guName} 보건분소`, lat: lat - 0.0025, lng: lng - 0.0015, desc: "공공 보건/의료 거점 사각 해소" }
+      ];
+
+      const amenities = [
+        { type: "cafe", name: `스타벅스 ${dongName}스퀘어`, lat: lat + 0.001, lng: lng - 0.002 },
+        { type: "park", name: `${dongName} 어울림 근린공원`, lat: lat - 0.0015, lng: lng + 0.002 },
+        { type: "mall", name: `${dongName} 대형 할인 식자재마트`, lat: lat + 0.0025, lng: lng + 0.0025 }
+      ];
+
+      const demandPoints = [
+        { lat: lat + 0.0008, lng: lng + 0.0012, weight: getSeededRandom(5, 0.70, 0.99) },
+        { lat: lat - 0.002, lng: lng + 0.0025, weight: getSeededRandom(6, 0.60, 0.85) }
+      ];
+
+      const nnr = parseFloat(getSeededRandom(7, 0.15, 0.48).toFixed(3));
+      const vmr = parseFloat(getSeededRandom(8, 7.2, 14.5).toFixed(2));
+
+      return {
+        name: `서울특별시 ${guName} ${dongName}`,
+        population: Math.round(guInfo.population / dongsArray.length + getSeededRandom(9, -2000, 4000)),
+        center: [lat, lng],
+        bounds: [[lat - latSpan, lng - lngSpan], [lat + latSpan, lng + lngSpan]],
+        nnr: nnr,
+        vmr: vmr,
+        chargers: chargers,
+        govOffices: govOffices,
+        amenities: amenities,
+        demandBase: demandPoints
+      };
+    }
+
+    // ----------------------------------------------------
+    // 6. 구/동 동적 다이내믹 셀렉터 바인딩
+    // ----------------------------------------------------
+    function initSelectors() {
+      const selectGu = document.getElementById('selectGu');
+      selectGu.innerHTML = '';
+      
+      Object.keys(seoulGeoData).forEach(gu => {
+        const opt = document.createElement('option');
+        opt.value = gu;
+        opt.innerText = gu;
+        selectGu.appendChild(opt);
+      });
+
+      selectGu.value = activeGu;
+      updateDongSelector();
+    }
+
+    function updateDongSelector() {
+      const selectDong = document.getElementById('selectDong');
+      selectDong.innerHTML = '';
+      
+      const dongs = seoulGeoData[activeGu].dongs;
+      dongs.forEach(dong => {
+        const opt = document.createElement('option');
+        opt.value = dong;
+        opt.innerText = dong;
+        selectDong.appendChild(opt);
+      });
+
+      if (dongs.includes("역삼1동")) activeDong = "역sam1동"; // UI 매핑에 따른 디폴트 보강
+      if (dongs.includes("역삼1동")) activeDong = "역삼1동";
+      else if (dongs.includes("서초1동")) activeDong = "서초1동";
+      else activeDong = dongs[0];
+
+      selectDong.value = activeDong;
+    }
+
+    function onGuChange() {
+      activeGu = document.getElementById('selectGu').value;
+      updateDongSelector();
+      loadActiveRegion();
+    }
+
+    function onDongChange() {
+      activeDong = document.getElementById('selectDong').value;
+      loadActiveRegion();
+    }
+
+    // ----------------------------------------------------
+    // 7. 실시간 API 연계 및 자치동 맵 활성화 로드
+    // ----------------------------------------------------
+    async function loadActiveRegion() {
+      // 1) 기본 데이터셋 구축
+      activeRegionData = buildDongSpatialData(activeGu, activeDong);
+
+      // 2) 가상 세션 충전소 누적 병합
+      const localHistory = userSimulatedChargers.filter(c => c.gu === activeGu && c.dong === activeDong);
+      localHistory.forEach(c => {
+        activeRegionData.chargers.push(c);
+      });
+
+      // 3) 지도 이동
+      map.setView(activeRegionData.center, 14);
+
+      // 4) UI 정보 컴포넌트 갱신
+      document.getElementById('txtRegionName').innerText = activeRegionData.name;
+      document.getElementById('txtRegionPop').innerText = activeRegionData.population.toLocaleString() + " 명";
+      document.getElementById('statNNR').innerText = `${activeRegionData.nnr} (군집)`;
+      document.getElementById('statVMR').innerText = activeRegionData.vmr.toString();
+
+      // 5) 격자 맵 그리드(8x8) 새로 수립
+      gridLayers.forEach(l => map.removeLayer(l));
+      gridLayers = [];
+      clearAllMarkers();
+
+      const bounds = activeRegionData.bounds;
+      const latStep = (bounds[1][0] - bounds[0][0]) / 8;
+      const lngStep = (bounds[1][1] - bounds[0][1]) / 8;
+
+      for (let i = 0; i < 8; i++) {
+        for (let j = 0; j < 8; j++) {
+          const latMin = bounds[0][0] + (i * latStep);
+          const latMax = latMin + latStep;
+          const lngMin = bounds[0][1] + (j * lngStep);
+          const lngMax = lngMin + lngStep;
+
+          const rectBounds = [[latMin, lngMin], [latMax, lngMax]];
+          const gridCenter = [latMin + (latStep / 2), lngMin + (lngStep / 2)];
+
+          const gridCell = L.rectangle(rectBounds, {
+            className: 'grid-cell-interactive',
+            fillColor: '#6366f1',
+            fillOpacity: 0.1,
+            color: '#334155',
+            weight: 1
+          }).addTo(map);
+
+          gridCell.center = gridCenter;
+          
+          // 격자 셀 클릭 이벤트 바인딩
+          gridCell.on('click', function(e) {
+            handleMapClick(gridCenter);
+          });
+
+          gridLayers.push(gridCell);
+        }
+      }
+
+      // 6) 실시간 서울시 OpenAPI 데이터 호출 연계
+      const apiAreaName = seoulGeoData[activeGu].apiArea;
+      document.getElementById('txtLiveUpdateArea').innerText = apiAreaName;
+      
+      const badge = document.getElementById('apiStatusBadge');
+      const text = document.getElementById('apiStatusText');
+      const signal = document.getElementById('apiStatusSignal');
+
+      signal.className = "w-2 h-2 rounded-full bg-amber-500 inline-block animate-ping";
+      text.innerHTML = `서울 도시데이터: <strong class="text-amber-400 font-medium font-mono">연동대기</strong>`;
+      badge.className = "bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl text-xs flex items-center gap-2 h-[42px] transition-colors";
+
+      logToTerminal(`[API] '${apiAreaName}' 실시간 도시데이터 쿼리 요청 중...`);
+
+      try {
+        const liveData = await fetchSeoulCityData(apiAreaName);
+        apiDataCache = liveData;
+
+        // UI 갱신
+        document.getElementById('txtLiveCongest').innerText = liveData["AREA_CONGEST_LVL"] || "정보없음";
+        document.getElementById('txtLiveSpeed').innerText = (liveData["ROAD_TRAFFIC_STTS"] && liveData["ROAD_TRAFFIC_STTS"]["ROAD_TRAFFIC_SPD"] ? liveData["ROAD_TRAFFIC_STTS"]["ROAD_TRAFFIC_SPD"] + " km/h" : "-");
+        document.getElementById('txtLiveTemp').innerText = (liveData["WEATHER_STTS"] && liveData["WEATHER_STTS"]["TEMP"] ? liveData["WEATHER_STTS"]["TEMP"] + " °C" : "-");
+        document.getElementById('txtLiveDust').innerText = (liveData["WEATHER_STTS"] && liveData["WEATHER_STTS"]["PM10"] ? liveData["WEATHER_STTS"]["PM10"] + " ㎍/㎥" : "-");
+        document.getElementById('txtLiveCongestMsg').innerText = liveData["AREA_CONGEST_MSG"] || "연동되었습니다.";
+
+        // 성공 배지 표시
+        signal.className = "w-2 h-2 rounded-full bg-emerald-500 inline-block";
+        text.innerHTML = `서울 도시데이터: <strong class="text-emerald-400 font-medium font-mono">연동성공</strong>`;
+        badge.className = "bg-emerald-950/20 border border-emerald-800/40 px-3 py-1.5 rounded-xl text-xs flex items-center gap-2 h-[42px] transition-colors";
+
+        logToTerminal(`[API] '${apiAreaName}' 실시간 도시데이터 수신 완료. (인구혼잡도: ${liveData["AREA_CONGEST_LVL"]})`);
+      } catch (err) {
+        logToTerminal(`[API] API 연계 오류 (${err.message}). 로컬 시뮬레이션 데이터를 주입합니다.`);
+        
+        const fallbackData = getFallbackMockData(apiAreaName);
+        apiDataCache = fallbackData;
+
+        document.getElementById('txtLiveCongest').innerText = fallbackData["AREA_CONGEST_LVL"];
+        document.getElementById('txtLiveSpeed').innerText = fallbackData["ROAD_TRAFFIC_STTS"]["ROAD_TRAFFIC_SPD"] + " km/h";
+        document.getElementById('txtLiveTemp').innerText = fallbackData["WEATHER_STTS"]["TEMP"] + " °C";
+        document.getElementById('txtLiveDust').innerText = fallbackData["WEATHER_STTS"]["PM10"] + " ㎍/㎥";
+        document.getElementById('txtLiveCongestMsg').innerText = fallbackData["AREA_CONGEST_MSG"] + " (모의 연동)";
+
+        signal.className = "w-2 h-2 rounded-full bg-indigo-500 inline-block";
+        text.innerHTML = `서울 도시데이터: <strong class="text-indigo-400 font-medium font-mono">가상연동</strong>`;
+        badge.className = "bg-indigo-950/20 border border-indigo-800/40 px-3 py-1.5 rounded-xl text-xs flex items-center gap-2 h-[42px] transition-colors";
+      }
+
+      // 7) 지도 위 마커 렌더링
+      renderMarkers();
+      
+      // 8) 가중치 분석 계산 가동 및 시각화
+      updateScores();
+    }
+
+    // ----------------------------------------------------
+    // 8. 지도 위 기존/가상 충전소 및 시설 마커 렌더링
+    // ----------------------------------------------------
+    function renderMarkers() {
+      clearAllMarkers();
+
+      // 기존 및 가상 충전소 마커
+      activeRegionData.chargers.forEach(c => {
+        let markerColor = c.type === 'public' ? '#6366f1' : '#10b981';
+        if (c.type === 'simulated') {
+          markerColor = '#eab308'; // 가상 설치 충전소는 노란색
+        }
+
+        const markerHtml = `<div style="background-color: ${markerColor}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #ffffff; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>`;
+        const icon = L.divIcon({
+          html: markerHtml,
+          className: '',
+          iconSize: [12, 12],
+          iconAnchor: [6, 6]
+        });
+
+        const m = L.marker([c.lat, c.lng], { icon: icon }).addTo(map);
+        
+        let popupText = `
+          <div class="text-xs">
+            <h4 class="font-bold text-white mb-1">${c.name}</h4>
+            <p class="text-slate-300">구분: ${c.type === 'public' ? '공공' : (c.type === 'private' ? '민간' : '시뮬레이션 가상소')}</p>
+            <p class="text-slate-400 mt-1">${c.detail || '상세 정보 없음'}</p>
+          </div>
+        `;
+        m.bindPopup(popupText);
+        
+        // 클릭 시 버퍼 생성 (B2C 트랙일 때 유용)
+        m.on('click', function() {
+          drawBufferCircle([c.lat, c.lng]);
+        });
+
+        chargerMarkers.push(m);
+      });
+
+      // 공공복지 인프라 마커 (B2G 가중 분석용)
+      activeRegionData.govOffices.forEach(g => {
+        const markerHtml = `<div style="background-color: #3b82f6; width: 10px; height: 10px; transform: rotate(45deg); border: 1.5px solid #ffffff;"></div>`;
+        const icon = L.divIcon({
+          html: markerHtml,
+          className: '',
+          iconSize: [10, 10],
+          iconAnchor: [5, 5]
+        });
+
+        const m = L.marker([g.lat, g.lng], { icon: icon }).addTo(map);
+        m.bindPopup(`<div class="text-xs"><h4 class="font-bold text-white">${g.name}</h4><p class="text-slate-400 mt-1">${g.desc}</p></div>`);
+        govMarkers.push(m);
+      });
+
+      // B2C 생활 편의 시설 마커 (B2C 탭 활성화 상태에서만 노출 가능)
+      if (activeTrack === "B2C") {
+        renderB2CAmenities();
+      }
+    }
+
+    function renderB2CAmenities() {
+      // 기존에 있던 편의시설 마커 제거
+      amenityMarkers.forEach(m => { if (map && map.hasLayer(m)) map.removeLayer(m); });
+      amenityMarkers = [];
+
+      const showCafe = document.getElementById('chkCafe').checked;
+      const showPark = document.getElementById('chkPark').checked;
+      const showMall = document.getElementById('chkMall').checked;
+
+      activeRegionData.amenities.forEach(a => {
+        if (a.type === 'cafe' && !showCafe) return;
+        if (a.type === 'park' && !showPark) return;
+        if (a.type === 'mall' && !showMall) return;
+
+        let iconHtml = "";
+        if (a.type === 'cafe') {
+          iconHtml = `<div class="bg-amber-500/90 text-white rounded p-1 flex items-center justify-center border border-white" style="width:20px; height:20px; font-size:10px;"><i class="fa-solid fa-mug-hot"></i></div>`;
+        } else if (a.type === 'park') {
+          iconHtml = `<div class="bg-emerald-500/90 text-white rounded p-1 flex items-center justify-center border border-white" style="width:20px; height:20px; font-size:10px;"><i class="fa-solid fa-tree"></i></div>`;
+        } else if (a.type === 'mall') {
+          iconHtml = `<div class="bg-indigo-500/90 text-white rounded p-1 flex items-center justify-center border border-white" style="width:20px; height:20px; font-size:10px;"><i class="fa-solid fa-bag-shopping"></i></div>`;
+        }
+
+        const icon = L.divIcon({
+          html: iconHtml,
+          className: '',
+          iconSize: [20, 20],
+          iconAnchor: [10, 10]
+        });
+
+        const m = L.marker([a.lat, a.lng], { icon: icon }).addTo(map);
+        m.bindPopup(`<div class="text-xs font-bold text-white">${a.name}</div>`);
+        amenityMarkers.push(m);
+      });
+    }
+
+    // ----------------------------------------------------
+    // 9. 다이내믹 공간 분석 및 적합도 스코어 연산
+    // ----------------------------------------------------
+    function getDistance(coord1, coord2) {
+      // 위경도 기준 단순 유클리드 스케일 연산 (밀접 거리용 보간 모델)
+      const dy = coord1[0] - coord2[0];
+      const dx = coord1[1] - coord2[1];
+      return Math.sqrt(dy * dy + dx * dx) * 100000; // 가중 미터 분배 계수
+    }
+
+    function updateScores() {
+      if (gridLayers.length === 0) return;
+
+      const scores = [];
+
+      // 1) 각 격자 셀에 대해 점수 산출
+      gridLayers.forEach(cell => {
+        const center = cell.center;
+
+        // 수요 지수 (Demand): 수요 고정 거점과의 거리 역함수 + 실시간 정체율 가중
+        let demandVal = 0;
+        activeRegionData.demandBase.forEach(dp => {
+          const dist = getDistance(center, [dp.lat, dp.lng]);
+          demandVal += dp.weight / (1 + dist * 0.005);
+        });
+
+        // 실시간 인구 가중 반영
+        if (apiDataCache) {
+          const congestLvl = apiDataCache["AREA_CONGEST_LVL"];
+          if (congestLvl === "붐빔") demandVal *= 1.25;
+          else if (congestLvl === "약간 붐빔") demandVal *= 1.1;
+        }
+
+        // 복지 지수 (Welfare): 공공 거점과의 접근성
+        let welfareVal = 0;
+        activeRegionData.govOffices.forEach(gov => {
+          const dist = getDistance(center, [gov.lat, gov.lng]);
+          welfareVal += 1 / (1 + dist * 0.003);
+        });
+
+        // 공급 차감 감쇄 지수 (Supply): 기존 및 가상 충전소와의 중첩 격차
+        let supplyVal = 0;
+        activeRegionData.chargers.forEach(chg => {
+          const dist = getDistance(center, [chg.lat, chg.lng]);
+          // 용량 가중치 추가
+          const cap = chg.capacity || 4;
+          supplyVal += cap / (1 + dist * 0.008);
+        });
+
+        // 최종 방정식 점수 조립
+        let finalScore = (weightAlpha * demandVal) + (weightBeta * welfareVal) - (weightGamma * supplyVal);
+        finalScore = Math.max(0, finalScore); // 마이너스 방지
+
+        cell.rawScore = finalScore;
+        scores.push(finalScore);
+      });
+
+      // 2) 점수 정규화 (Min-Max Scaling to 0~100)
+      const minScore = Math.min(...scores);
+      const maxScore = Math.max(...scores);
+      const span = maxScore - minScore || 1;
+
+      const normScores = [];
+
+      gridLayers.forEach(cell => {
+        const normalized = Math.round(((cell.rawScore - minScore) / span) * 100);
+        cell.score = normalized;
+        normScores.push(normalized);
+
+        // 점수별 타일 컬러 가중 렌더링
+        let color = '#4f46e5'; // Blue/Indigo
+        let opacity = 0.02;
+
+        if (normalized > 85) { color = '#312e81'; opacity = 0.75; } // 진한 인디고 (최적)
+        else if (normalized > 65) { color = '#4338ca'; opacity = 0.55; }
+        else if (normalized > 45) { color = '#4f46e5'; opacity = 0.35; }
+        else if (normalized > 25) { color = '#6366f1'; opacity = 0.20; }
+        else { color = '#818cf8'; opacity = 0.05; }
+
+        cell.setStyle({
+          fillColor: color,
+          fillOpacity: opacity,
+          color: '#334155',
+          weight: 0.8
+        });
+
+        // 툴팁 바인딩
+        cell.bindTooltip(`최적 적합 스코어: <strong class='text-yellow-400 font-bold'>${normalized}점</strong>`, {
+          sticky: true,
+          direction: 'top',
+          className: 'bg-slate-900 border border-slate-800 text-slate-100 rounded-lg text-[10px] px-2 py-1 shadow-lg'
+        });
+      });
+
+      // 3) 차트 및 통계 업데이트
+      updateChart(normScores);
+      updateSpatialInsights(normScores);
+    }
+
+    function updateSpatialInsights(normScores) {
+      const avg = Math.round(normScores.reduce((a, b) => a + b, 0) / normScores.length);
+      const topScores = normScores.filter(s => s >= 80).length;
+
+      let insightMsg = "";
+      if (topScores === 0) {
+        insightMsg = `현재 가중 제어 상태에서 스코어 80점 이상의 입지 강후보지가 존재하지 않습니다. 수요/복지 가중치를 늘리거나, 공급 감쇄(γ)를 소폭 줄여주십시오.`;
+      } else {
+        insightMsg = `선택된 ${activeDong} 지구 내에 분석 격자 점수가 극대화(80점 이상)되는 최적 사각 격자가 <strong class="text-indigo-400 font-bold">${topScores}개</strong> 식별되었습니다. 지도의 진한 타일을 클릭하여 충전소를 가상 설치해 보십시오.`;
+      }
+
+      document.getElementById('txtSpatialInsight').innerHTML = insightMsg;
+    }
+
+    // ----------------------------------------------------
+    // 10. 인터랙티브 가상 충전소 생성 핸들러
+    // ----------------------------------------------------
+    function handleMapClick(latlng) {
+      const lat = parseFloat(latlng[0].toFixed(5));
+      const lng = parseFloat(latlng[1].toFixed(5));
+
+      document.getElementById('mapSelectedCoord').innerText = `${lat}, ${lng}`;
+
+      // 가상 충전소 데이터 생성
+      const id = "sim_" + Date.now();
+      const newSimCharger = {
+        id: id,
+        lat: lat,
+        lng: lng,
+        capacity: 6, // 디폴트 급속 6기 스펙
+        type: "simulated",
+        name: `가상 충전소 (시뮬레이션 #${userSimulatedChargers.length + 1})`,
+        detail: "Proposed 급속 4기 / 완속 2기 연동",
+        gu: activeGu,
+        dong: activeDong
+      };
+
+      // 세션 저장 및 가동 구역 업데이트
+      userSimulatedChargers.push(newSimCharger);
+      activeRegionData.chargers.push(newSimCharger);
+
+      // 이력 리스트 추가
+      updateSimulationHistory();
+
+      // 마커 및 적합도 스코어 리렌더링
+      renderMarkers();
+      updateScores();
+
+      showToast("시뮬레이션 가상소 추가 완료", `좌표 [${lat}, ${lng}] 지점에 모의 충전 거점을 임시 수립하고 인프라 전력 부하 적합성 점수를 다이내믹하게 재산출했습니다.`);
+      logToTerminal(`[MODEL] 가상 충전소 추가 완료: ${newSimCharger.name} (위경도: ${lat}, ${lng})`);
+    }
+
+    function removeSimulatedCharger(id) {
+      // 데이터 제거
+      userSimulatedChargers = userSimulatedChargers.filter(c => c.id !== id);
+      activeRegionData.chargers = activeRegionData.chargers.filter(c => c.id !== id);
+
+      updateSimulationHistory();
+      renderMarkers();
+      updateScores();
+
+      showToast("시뮬레이션 가상소 철회", "지정하신 가상 설치 거점을 제거하고 공간 스코어 타일을 동기화했습니다.");
+      logToTerminal(`[MODEL] 가상 충전소 제거 완료: (ID: ${id})`);
+    }
+
+    function updateSimulationHistory() {
+      const container = document.getElementById('simulationHistoryList');
+      container.innerHTML = "";
+
+      const localHistory = userSimulatedChargers.filter(c => c.gu === activeGu && c.dong === activeDong);
+
+      if (localHistory.length === 0) {
+        container.innerHTML = `<div class="text-slate-500 text-center py-4">생성된 가상 충전소가 없습니다.</div>`;
+        return;
+      }
+
+      localHistory.forEach((c, idx) => {
+        const item = document.createElement('div');
+        item.className = "bg-slate-950/70 border border-slate-800 rounded-xl p-2.5 flex items-center justify-between gap-2 hover:border-slate-700 transition-colors";
+        item.innerHTML = `
+          <div>
+            <p class="font-bold text-slate-200">#${idx + 1} Proposed Point</p>
+            <p class="text-[9px] text-slate-500 mt-0.5">${c.lat.toFixed(4)}, ${c.lng.toFixed(4)}</p>
+          </div>
+          <button onclick="removeSimulatedCharger('${c.id}')" class="text-rose-400 hover:text-rose-300 font-semibold text-[10px] flex items-center gap-1">
+            <i class="fa-solid fa-trash-can"></i> 삭제
+          </button>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    // ----------------------------------------------------
+    // 11. B2C 도보 반경 버퍼 버퍼 시각화
+    // ----------------------------------------------------
+    function drawBufferCircle(center) {
+      if (activeTrack !== "B2C") return;
+
+      if (activeBufferCircle && map.hasLayer(activeBufferCircle)) {
+        map.removeLayer(activeBufferCircle);
+      }
+
+      activeBufferCircle = L.circle(center, {
+        radius: bufferRadius,
+        color: '#10b981',
+        weight: 1.5,
+        fillColor: '#10b981',
+        fillOpacity: 0.15,
+        dashArray: '3, 4'
+      }).addTo(map);
+
+      logToTerminal(`[MAP] 클릭된 거점 중심 도보 ${bufferRadius}m 버퍼 링 가시화 완료.`);
+    }
+
+    // ----------------------------------------------------
+    // 12. Chart.js 스코어 분포 시각화 모듈
+    // ----------------------------------------------------
+    function initChart() {
+      const ctx = document.getElementById('scoreChart').getContext('2d');
+      
+      scoreChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['0-20', '21-40', '41-60', '61-80', '81-100'],
+          datasets: [{
+            label: '격자 수',
+            data: [0, 0, 0, 0, 0],
+            backgroundColor: [
+              'rgba(129, 140, 248, 0.3)',
+              'rgba(99, 102, 241, 0.45)',
+              'rgba(79, 70, 229, 0.6)',
+              'rgba(67, 56, 202, 0.75)',
+              'rgba(49, 46, 129, 0.9)'
+            ],
+            borderColor: '#4f46e5',
+            borderWidth: 1,
+            borderRadius: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            x: {
+              grid: { display: false },
+              ticks: { color: '#94a3b8', font: { size: 9 } }
+            },
+            y: {
+              grid: { color: 'rgba(51, 65, 85, 0.3)' },
+              ticks: { color: '#94a3b8', font: { size: 9 }, precision: 0 }
+            }
+          }
+        }
+      });
+    }
+
+    function updateChart(normScores) {
+      if (!scoreChart) return;
+
+      const bins = [0, 0, 0, 0, 0];
+      normScores.forEach(s => {
+        if (s <= 20) bins[0]++;
+        else if (s <= 40) bins[1]++;
+        else if (s <= 60) bins[2]++;
+        else if (s <= 80) bins[3]++;
+        else bins[4]++;
+      });
+
+      scoreChart.data.datasets[0].data = bins;
+      scoreChart.update();
+    }
+
+    // ----------------------------------------------------
+    // 13. UI 컴포넌트 컨트롤 핸들러
+    // ----------------------------------------------------
+    function setTrack(trackMode) {
+      activeTrack = trackMode;
+      
+      const btnB2G = document.getElementById('btnTrackB2G');
+      const btnB2C = document.getElementById('btnTrackB2C');
+      const panelB2G = document.getElementById('panelB2G');
+      const panelB2C = document.getElementById('panelB2C');
+      const algoBadge = document.getElementById('txtAlgoType');
+
+      if (trackMode === 'B2G') {
+        btnB2G.className = "flex-1 py-2 rounded-xl text-xs font-bold transition-all bg-slate-800 text-white flex items-center justify-center gap-2 border border-slate-700/50";
+        btnB2C.className = "flex-1 py-2 rounded-xl text-xs font-bold transition-all text-slate-400 hover:text-white flex items-center justify-center gap-2";
+        panelB2G.classList.remove('hidden');
+        panelB2C.classList.add('hidden');
+        algoBadge.innerText = "Seoul Dynamic GWR";
+        
+        // B2G 렌더링 리로드
+        renderMarkers();
+        updateScores();
+        logToTerminal("[SYSTEM] B2G 정책 입안용 분석 모드 가동.");
+      } else {
+        btnB2G.className = "flex-1 py-2 rounded-xl text-xs font-bold transition-all text-slate-400 hover:text-white flex items-center justify-center gap-2";
+        btnB2C.className = "flex-1 py-2 rounded-xl text-xs font-bold transition-all bg-slate-800 text-white flex items-center justify-center gap-2 border border-slate-700/50";
+        panelB2G.classList.add('hidden');
+        panelB2C.classList.remove('hidden');
+        algoBadge.innerText = "B2C Walkability Model";
+        
+        // B2C 렌더링 리로드 (편의시설 아이콘 등 활성)
+        renderMarkers();
+        updateScores();
+        logToTerminal("[SYSTEM] B2C 생활 밀착형 거점 분석 모드 가동.");
+      }
+    }
+
+    function updateWeights() {
+      weightAlpha = parseFloat(document.getElementById('sliderAlpha').value);
+      weightBeta = parseFloat(document.getElementById('sliderBeta').value);
+      weightGamma = parseFloat(document.getElementById('sliderGamma').value);
+
+      document.getElementById('valWeightAlpha').innerText = weightAlpha.toFixed(2);
+      document.getElementById('valWeightBeta').innerText = weightBeta.toFixed(2);
+      document.getElementById('valWeightGamma').innerText = weightGamma.toFixed(2);
+
+      // 수식 텍스트 갱신
+      document.getElementById('latexFormula').innerText = `Score = ${weightAlpha}·Demand + ${weightBeta}·Welfare - ${weightGamma}·Supply`;
+
+      updateScores();
+    }
+
+    function resetSliders() {
+      document.getElementById('sliderAlpha').value = 0.5;
+      document.getElementById('sliderBeta').value = 0.3;
+      document.getElementById('sliderGamma').value = 0.4;
+      updateWeights();
+      logToTerminal("[MODEL] 공간 가중치 분석 계수(α, β, γ)가 표준 지리학 규격으로 초기화되었습니다.");
+    }
+
+    function toggleAmenityLayer() {
+      if (activeTrack !== "B2C") return;
+      renderB2CAmenities();
+      logToTerminal("[MAP] 생활 시설 레이어 필터 상태가 토글되었습니다.");
+    }
+
+    function updateBufferRadius() {
+      bufferRadius = parseInt(document.getElementById('sliderBuffer').value);
+      const mins = Math.round(bufferRadius / 60);
+      document.getElementById('valBufferRadius').innerText = `${bufferRadius}m (도보 약 ${mins}분)`;
+      
+      // 버퍼가 켜져 있으면 새로 고침
+      if (activeBufferCircle && map.hasLayer(activeBufferCircle)) {
+        const center = activeBufferCircle.getLatLng();
+        drawBufferCircle([center.lat, center.lng]);
+      }
+    }
+
+    // ----------------------------------------------------
+    // 14. 실시간 Webhook 전송 및 보고서 다운로드 시뮬레이션
+    // ----------------------------------------------------
+    function triggerSimulatedAPI() {
+      logToTerminal("[WEBHOOK] 서울시 열린데이터광장 및 클라우드 연동 전송 시퀀스 개시...");
+      
+      const payload = {
+        timestamp: new Date().toISOString(),
+        region: activeRegionData.name,
+        target_gu: activeGu,
+        target_dong: activeDong,
+        weights: { alpha: weightAlpha, beta: weightBeta, gamma: weightGamma },
+        simulated_points: userSimulatedChargers.filter(c => c.gu === activeGu && c.dong === activeDong)
+      };
+
+      setTimeout(() => {
+        logToTerminal(`[WEBHOOK] 전송 성공: status 202 ACCEPTED (자치동: ${activeDong}, 세션 가상거점수: ${payload.simulated_points.length}개)`);
+        showToast("Webhook 동기화 완료", "현 시간 기준 시뮬레이션 분석 지표가 클라우드 대시보드 저장소에 정상 동기화되었습니다.");
+      }, 1000);
+    }
+
+    function downloadReport() {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({
+        report_title: `서울시 공공 충전소 최적 입지 분석 보고서 - ${activeDong}`,
+        date: new Date().toLocaleDateString(),
+        region: activeRegionData.name,
+        estimated_population: activeRegionData.population,
+        spatial_indices: { NNR: activeRegionData.nnr, VMR: activeRegionData.vmr },
+        applied_weights: { alpha: weightAlpha, beta: weightBeta, gamma: weightGamma },
+        simulated_charger_count: userSimulatedChargers.filter(c => c.gu === activeGu && c.dong === activeDong).length
+      }, null, 2));
+
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `EV_Site_Report_${activeGu}_${activeDong}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+
+      logToTerminal(`[SYSTEM] 보고서 파일 저장 완료 (EV_Site_Report_${activeGu}_${activeDong}.json)`);
+      showToast("보고서 파일 내보내기", "지리 공간 분석 결과 지표 요약서가 JSON 규격으로 저장되었습니다.");
+    }
+
+    // ----------------------------------------------------
+    // 15. 터미널 및 토스트 로그 헬퍼
+    // ----------------------------------------------------
+    function logToTerminal(message) {
+      const term = document.getElementById('logTerminal');
+      const logLine = document.createElement('div');
+      logLine.innerText = `> ${message}`;
+      term.appendChild(logLine);
+      term.scrollTop = term.scrollHeight;
+    }
+
+    function clearLogs() {
+      document.getElementById('logTerminal').innerHTML = '<div class="text-slate-500">[SYSTEM] 로그가 리셋되었습니다.</div>';
+    }
+
+    function showToast(title, body) {
+      const toast = document.getElementById('toastNotification');
+      document.getElementById('toastTitle').innerText = title;
+      document.getElementById('toastBody').innerText = body;
+
+      toast.classList.remove('translate-y-20', 'opacity-0', 'pointer-events-none');
+      toast.classList.add('translate-y-0', 'opacity-100');
+
+      // Auto hide after 4 seconds
+      setTimeout(hideToast, 4000);
+    }
+
+    function hideToast() {
+      const toast = document.getElementById('toastNotification');
+      toast.classList.remove('translate-y-0', 'opacity-100');
+      toast.classList.add('translate-y-20', 'opacity-0', 'pointer-events-none');
+    }
+
+    // ----------------------------------------------------
+    // 16. 애플리케이션 진입점 초기화
+    // ----------------------------------------------------
+    window.addEventListener('DOMContentLoaded', () => {
+      // 1) 리플렛 지도 초기화 (CartoDB Positron Dark 테마)
+      map = L.map('map', {
+        zoomControl: false // 커스텀 UI를 위해 줌 버튼은 숨김
+      }).setView([37.4959, 127.0664], 14);
+
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 20
+      }).addTo(map);
+
+      // 줌 컨트롤 우측 하단에 별도 삽입
+      L.control.zoom({
+        position: 'bottomright'
+      }).addTo(map);
+
+      // 2) 자치구/동 드롭다운 초기 채우기
+      initSelectors();
+
+      // 3) Chart.js 그래프 준비
+      initChart();
+
+      // 4) 현재 동(역삼1동) 가동
+      loadActiveRegion();
+      
+      logToTerminal("[SYSTEM] 전기차 충전소 공간 분석 클라이언트 엔진 가동 완료.");
+    });
+  </script>
+</body>
+</html>
